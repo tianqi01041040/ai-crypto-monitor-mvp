@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ai.crypto.monitor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/mac/Documents/Codex/ai-crypto-monitor-mvp/run_webapp.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/mac/Documents/Codex/ai-crypto-monitor-mvp</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AI_CRYPTO_MONITOR_HOST</key>
+    <string>127.0.0.1</string>
+    <key>AI_CRYPTO_MONITOR_PORT</key>
+    <string>5180</string>
+    <key>PYTHONPATH</key>
+    <string>/Users/mac/Documents/Codex/ai-crypto-monitor-mvp/.vendor:/Users/mac/Documents/Codex/ai-crypto-monitor-mvp</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/mac/Documents/Codex/ai-crypto-monitor-mvp/logs/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/mac/Documents/Codex/ai-crypto-monitor-mvp/logs/launchd.err.log</string>
+</dict>
+</plist>

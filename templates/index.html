@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Crypto Alert Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Crypto Alert Bot</p>
+          <h1>加密货币交易提醒机器人</h1>
+          <p class="subtitle">只做公开行情监控、信号生成、Telegram 提醒，不自动下单，不接私钥。</p>
+        </div>
+        <div class="hero-side">
+          <span id="bot-status-pill" class="status-pill">加载中</span>
+          <span class="tiny-text">最近更新：<strong id="updated-at">{{ payload.updated_at }}</strong></span>
+        </div>
+      </header>
+
+      <section class="hero-health">
+        <article class="health-card">
+          <span class="health-label">服务健康状态</span>
+          <strong id="service-health-text" class="health-value">加载中</strong>
+          <p id="service-health-note" class="health-note">正在读取服务状态...</p>
+          <div class="health-legend">
+            <span class="legend-item legend-green"><i></i>绿色：正常</span>
+            <span class="legend-item legend-yellow"><i></i>黄色：等待下一轮</span>
+            <span class="legend-item legend-red"><i></i>红色：异常需要处理</span>
+          </div>
+        </article>
+        <article class="health-card">
+          <span class="health-label">上次成功检查时间</span>
+          <strong id="last-success-at" class="health-value">{{ payload.bot.last_success_at or "暂无" }}</strong>
+          <p class="health-note">只要这里持续更新，就说明机器人还在正常抓行情。</p>
+        </article>
+        <article class="health-card">
+          <span class="health-label">最近一次推送到 Telegram</span>
+          <strong id="last-push-at" class="health-value">{{ payload.bot.last_push_at or "暂无" }}</strong>
+          <p id="last-push-note" class="health-note">这里只有在真的推送成功后才会更新。</p>
+          <p id="last-push-symbols" class="health-subline">最近一次推送的币种：暂无</p>
+          <p id="last-test-push-at" class="health-subline">最近一次 Telegram 测试发送时间：暂无</p>
+        </article>
+        <article class="health-card">
+          <span class="health-label">最近错误信息</span>
+          <strong id="last-error-text" class="health-value">无</strong>
+          <p id="last-error-note" class="health-note">没有错误时，这里会显示“无”。</p>
+          <div class="health-actions">
+            <button id="restart-service-button" type="button" class="secondary-button restart-button">一键重启服务</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="status-banner-wrap">
+        <div id="plain-status-banner" class="plain-status-banner">正在读取推送状态...</div>
+      </section>
+
+      <main class="grid">
+        <section class="panel panel-wide">
+          <div class="panel-head">
+            <h2>机器人控制台</h2>
+            <span id="status-message" class="tiny-pill">{{ payload.status_message }}</span>
+          </div>
+          <div class="action-row">
+            <button id="toggle-bot-button" class="primary-button">开启机器人</button>
+            <button id="run-once-button" class="secondary-button">立即检查一次</button>
+            <button id="test-telegram-button" class="secondary-button">测试 Telegram</button>
+          </div>
+          <p id="action-message" class="helper-text">机器人会每 5 分钟检查一次行情，触发条件后自动发 Telegram。</p>
+          <div id="alert-thresholds" class="helper-text helper-highlight">当前标准：加载中</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>基础设置</h2>
+          </div>
+          <form id="settings-form" class="form-stack">
+            <label>
+              交易所
+              <select id="preferred-exchange" name="preferred_exchange">
+                <option value="binance">Binance</option>
+                <option value="okx">OKX</option>
+              </select>
+            </label>
+            <label>
+              检查频率
+              <select id="poll-interval-seconds" name="poll_interval_seconds">
+                <option value="300">每 5 分钟</option>
+                <option value="600">每 10 分钟</option>
+                <option value="900">每 15 分钟</option>
+              </select>
+            </label>
+            <label class="checkbox-row">
+              <input id="notifications-enabled" name="notifications_enabled" type="checkbox">
+              <span>开启 Telegram 推送</span>
+            </label>
+            <button type="submit" class="primary-button full-button">保存设置</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Telegram 设置</h2>
+          </div>
+          <form id="telegram-form" class="form-stack">
+            <label>
+              `TELEGRAM_BOT_TOKEN`
+              <input id="telegram-bot-token" type="text" placeholder="例如 123456789:AA...">
+            </label>
+            <label>
+              `TELEGRAM_CHAT_ID`
+              <input id="telegram-chat-id" type="text" placeholder="例如 123456789">
+            </label>
+            <p class="helper-text">保存后会写入本地设置文件；部署到云端时，建议写成环境变量。</p>
+          </form>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-head">
+            <h2>当前监控标的</h2>
+            <span id="monitor-meta" class="tiny-pill">准备中</span>
+          </div>
+          <div id="market-grid" class="market-grid"></div>
+        </section>
+
+        <section class="panel panel-wide trend-learning-panel">
+          <div class="panel-head">
+            <div>
+              <h2>小白K线趋势热力图学习系统</h2>
+              <p class="panel-subtitle">先看大方向，再看节奏，再找入场、止损和目标区。</p>
+            </div>
+            <span id="trend-headline" class="tiny-pill trend-headline-pill">加载中</span>
+          </div>
+
+          <div class="trend-top-grid">
+            <article class="trend-overview-card">
+              <div class="trend-selector-head">
+                <div>
+                  <strong>标的选择</strong>
+                  <p>BTC、ETH、SOL、XAU（真实版第一步）</p>
+                </div>
+                <div class="trend-current-asset">
+                  <span>当前学习标的</span>
+                  <strong id="trend-current-asset">BTC</strong>
+                </div>
+              </div>
+              <div id="trend-asset-buttons" class="trend-asset-buttons"></div>
+            </article>
+
+            <article class="trend-overview-card">
+              <strong>一眼先看什么</strong>
+              <div class="trend-key-points">
+                <div class="trend-mini-card trend-mini-card-positive">
+                  <span>方向</span>
+                  <strong id="trend-bias-text">加载中</strong>
+                </div>
+                <div class="trend-mini-card trend-mini-card-neutral">
+                  <span>当前阶段</span>
+                  <strong id="trend-phase-text">加载中</strong>
+                </div>
+                <div class="trend-mini-card">
+                  <span>趋势还能持续多久</span>
+                  <strong id="trend-duration-text">加载中</strong>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="panel-head trend-section-head">
+            <div>
+              <h3>多周期趋势热力图</h3>
+              <p class="panel-subtitle">深绿色强上涨，浅绿色弱上涨，黄色震荡，浅红色弱下跌，深红色强下跌</p>
+            </div>
+            <div class="trend-legend">
+              <span class="legend-chip chip-strong-bull">强上涨</span>
+              <span class="legend-chip chip-weak-bull">弱上涨</span>
+              <span class="legend-chip chip-range">震荡</span>
+              <span class="legend-chip chip-weak-bear">弱下跌</span>
+              <span class="legend-chip chip-strong-bear">强下跌</span>
+            </div>
+          </div>
+          <div id="trend-focus-summary" class="trend-focus-summary">加载中</div>
+          <div id="trend-heatmap" class="trend-heatmap-grid"></div>
+
+          <div class="trend-insight-grid">
+            <article class="trend-overview-card">
+              <h3>趋势时效解释卡片</h3>
+              <div class="trend-timeframe-stack">
+                <button type="button" class="trend-timeframe-card trend-timeframe-trigger" data-timeframe="日线"><span>日线</span><strong>潮汐，决定大方向</strong></button>
+                <button type="button" class="trend-timeframe-card trend-timeframe-trigger" data-timeframe="4小时"><span>4小时</span><strong>海浪，决定节奏</strong></button>
+                <button type="button" class="trend-timeframe-card trend-timeframe-trigger" data-timeframe="15分钟"><span>15分钟</span><strong>上车机会</strong></button>
+                <button type="button" class="trend-timeframe-card trend-timeframe-trigger" data-timeframe="5分钟"><span>5分钟</span><strong>具体入场点</strong></button>
+                <button type="button" class="trend-timeframe-card trend-timeframe-trigger" data-timeframe="1小时"><span>1小时</span><strong>看当天节奏</strong></button>
+              </div>
+              <p id="trend-explanation-text" class="trend-long-text">加载中</p>
+            </article>
+
+            <article class="trend-ai-card">
+              <h3>AI 小白解释区</h3>
+              <p class="panel-subtitle">把多周期关系翻译成更容易理解的话</p>
+              <blockquote id="trend-ai-text" class="trend-ai-quote">加载中</blockquote>
+              <p class="trend-ai-footnote">先看日线和 4 小时，再用 15 分钟和 5 分钟找位置。</p>
+            </article>
+
+            <article class="trend-warning-card">
+              <h3>趋势冲突提醒</h3>
+              <p id="trend-warning-text" class="trend-long-text">加载中</p>
+            </article>
+          </div>
+
+          <div class="panel-head trend-section-head">
+            <div>
+              <h3>入场 / 止损 / 止盈区域</h3>
+              <p class="panel-subtitle">把方向翻成执行计划：等哪里、退哪里、先看到哪里。</p>
+            </div>
+            <span id="trend-risk-reward-pill" class="tiny-pill">盈亏比：加载中</span>
+          </div>
+          <div id="trend-plan-summary" class="trend-plan-summary">加载中</div>
+          <div id="trend-plan-grid" class="trend-plan-grid"></div>
+
+          <div class="panel-head trend-section-head">
+            <div>
+              <h3>为什么这样判断</h3>
+              <p class="panel-subtitle">把每个周期判成上涨 / 下跌 / 震荡的依据拆开看。</p>
+            </div>
+          </div>
+          <div id="trend-reason-grid" class="trend-reason-grid"></div>
+
+          <div class="trend-risk-footer">
+            本系统仅用于学习和模拟，不构成投资建议，不自动下单。
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>美股代币观察列表</h2>
+          </div>
+          <div id="stock-watchlist-box" class="info-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>运行状态</h2>
+          </div>
+          <div id="runtime-box" class="info-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>统计预留</h2>
+          </div>
+          <div id="stats-box" class="info-list"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-head">
+            <h2>最近信号</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>标的</th>
+                  <th>方向</th>
+                  <th>当前价格</th>
+                  <th>入场观察区</th>
+                  <th>止损</th>
+                  <th>止盈1</th>
+                  <th>止盈2</th>
+                  <th>风险</th>
+                  <th>触发原因</th>
+                </tr>
+              </thead>
+              <tbody id="signals-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-head">
+            <h2>新手说明</h2>
+          </div>
+          <div class="steps">
+            <div class="step-card">
+              <strong>1. 先保存 Telegram Token 和 Chat ID</strong>
+              <p>保存后点“测试 Telegram”，确认消息能收到。</p>
+            </div>
+            <div class="step-card">
+              <strong>2. 再点“开启机器人”</strong>
+              <p>开启后，后台会自动每 5 分钟检查一次。</p>
+            </div>
+            <div class="step-card">
+              <strong>3. 打开最近信号区域查看结果</strong>
+              <p>这里会显示方向、入场观察区、止损、止盈和触发原因。</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="trend-teaching-modal" class="trend-teaching-modal" hidden>
+      <div id="trend-teaching-backdrop" class="trend-teaching-backdrop"></div>
+      <div class="trend-teaching-dialog" role="dialog" aria-modal="true" aria-labelledby="trend-teaching-title">
+        <button id="trend-teaching-close" type="button" class="trend-teaching-close" aria-label="关闭">×</button>
+        <span id="trend-teaching-label" class="trend-teaching-label">教学模式</span>
+        <h3 id="trend-teaching-title">这个周期你该怎么看</h3>
+        <p id="trend-teaching-role" class="trend-teaching-role">加载中</p>
+        <div class="trend-teaching-conclusion">
+          <div class="trend-teaching-action" id="trend-teaching-action">适合做什么：加载中</div>
+          <div class="trend-teaching-avoidline" id="trend-teaching-avoidline">不适合做什么：加载中</div>
+        </div>
+        <div class="trend-teaching-copy">
+          <p id="trend-teaching-what">加载中</p>
+          <p id="trend-teaching-focus">加载中</p>
+          <p id="trend-teaching-avoid">加载中</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const initialPayload = {{ payload|tojson }};
+      const initialSettings = {{ settings|tojson }};
+      let selectedTrendAsset = "BTC";
+      let currentTeachingContext = {};
+      const timeframeTeaching = {
+        "5分钟": {
+          role: "这是脚下台阶，用来找最具体的进场动作。",
+          what: "你主要看这里有没有止跌、转弱、站稳这种很短线的动作。",
+          focus: "如果大方向偏多，就等它先站稳再考虑；如果大方向偏空，就等它反弹后再转弱。",
+          avoid: "不要只因为 5 分钟突然涨一下或跌一下，就把它当成大趋势已经反转。"
+        },
+        "15分钟": {
+          role: "这是上车机会区，用来判断有没有更像样的切入点。",
+          what: "你主要看这里是在回踩、反弹，还是开始真正往一个方向推进。",
+          focus: "如果它开始和日线、4小时同向，通常更适合观察计划；如果它反着走，更像短线波动。",
+          avoid: "不要在 15 分钟还很乱的时候提前重仓，先等方向更清楚。"
+        },
+        "1小时": {
+          role: "这是当天节奏尺子，用来判断日内偏强还是偏弱。",
+          what: "你主要看今天这波行情是在延续，还是已经开始放慢、转折。",
+          focus: "如果 1 小时和 4 小时同向，说明日内更容易顺着走；不同向时先当成拉扯看。",
+          avoid: "不要把 1 小时的小回踩误判成大方向已经彻底结束。"
+        },
+        "4小时": {
+          role: "这是海浪节奏，用来决定计划到底偏多还是偏空。",
+          what: "你主要看这波节奏是继续抬高，还是继续走低。",
+          focus: "它通常决定你更适合等回踩做多，还是等反弹做空。",
+          avoid: "如果 4 小时还没明确，先别急着给自己定死方向。"
+        },
+        "日线": {
+          role: "这是潮汐方向，用来判断大方向到底站在哪边。",
+          what: "你主要看市场总体是偏多、偏空，还是还在大区间里来回拉扯。",
+          focus: "当别的周期和日线同向时，更适合顺着做；反着走时更像短线逆波动。",
+          avoid: "不要拿日线去找精确进场点，它更像地图，不是方向盘。"
+        }
+      };
+
+      function alignmentExplain(meta) {
+        if (meta.label === "顺大方向") return "更适合顺着做。";
+        if (meta.label === "逆大方向") return "更像短线反着走。";
+        return "先等它跟上大方向。";
+      }
+
+      function beginnerFocusMeta(cell, dailyDirection) {
+        let score = 2;
+        let label = "先略过";
+        if (cell.timeframe === "15分钟") score += 2;
+        if (cell.timeframe === "5分钟" || cell.timeframe === "4小时") score += 1;
+        if (cell.direction !== "震荡") score += 1;
+        if (cell.direction === dailyDirection && dailyDirection !== "震荡") score += 1;
+        if (cell.score >= 72) score += 1;
+        score = Math.max(1, Math.min(5, score));
+        if (score >= 5) label = "重点看";
+        else if (score >= 4) label = "值得看";
+        else if (score >= 3) label = "可以看";
+        return { score, label };
+      }
+
+      function buildDynamicTeaching(timeframe, cell, dailyCell) {
+        const base = timeframeTeaching[timeframe] || timeframeTeaching["15分钟"];
+        const alignMeta = alignmentMeta(cell?.direction || "震荡", dailyCell?.direction || "震荡");
+        const focusMeta = beginnerFocusMeta(cell || { timeframe, direction: "震荡", score: 50 }, dailyCell?.direction || "震荡");
+        const signalMeta = cellSignalMeta(cell || { direction: "震荡" });
+        const directionWord = signalMeta.label;
+        let actionLine = "适合先观察，不要急着动。";
+        let avoidLine = "不适合只看一两根小K线就下判断。";
+        if (timeframe === "5分钟") {
+          actionLine = cell?.direction === "上涨" ? "适合等站稳后看具体进场。" : cell?.direction === "下跌" ? "适合等转弱后看具体空点。" : "适合只拿来等确认动作。";
+          avoidLine = "不适合把 5 分钟的小波动当成全天方向。";
+        } else if (timeframe === "15分钟") {
+          actionLine = alignMeta.label === "顺大方向" ? "适合重点看有没有更像样的上车机会。" : "适合先看它会不会重新跟回大方向。";
+          avoidLine = "不适合在它还很乱的时候提前重仓。";
+        } else if (timeframe === "1小时") {
+          actionLine = "适合判断今天这波节奏到底偏强还是偏弱。";
+          avoidLine = "不适合拿它当最精确的进场按钮。";
+        } else if (timeframe === "4小时") {
+          actionLine = "适合拿来决定今天计划到底偏多还是偏空。";
+          avoidLine = "不适合在它还没明确前硬定方向。";
+        } else if (timeframe === "日线") {
+          actionLine = "适合先定大方向，再决定别的周期该怎么配合。";
+          avoidLine = "不适合直接拿日线去找具体进场点。";
+        }
+        return {
+          role: `${base.role} 当前这个周期现在是“${directionWord}”，而且${alignMeta.label}。`,
+          what: `${base.what} 结合现在这组数据，更像是 ${directionWord} 节奏，趋势强度约 ${cell?.score ?? "--"}/100。`,
+          focus: `${base.focus} 眼下更适合把它当成“${focusMeta.label}”的周期来用。${alignmentExplain(alignMeta)}`,
+          avoid: `${base.avoid} 如果它还是 ${alignMeta.label}，就先别把短线动作误以为大方向已经彻底变了。`,
+          actionLine,
+          avoidLine,
+          score: focusMeta.score,
+          scoreLabel: focusMeta.label,
+        };
+      }
+
+      function openTeachingModal(timeframe) {
+        const data = currentTeachingContext[timeframe] || timeframeTeaching[timeframe] || timeframeTeaching["15分钟"];
+        document.getElementById("trend-teaching-label").textContent = `${timeframe} 教学模式`;
+        document.getElementById("trend-teaching-title").textContent = `${timeframe} 这个周期你该怎么看`;
+        document.getElementById("trend-teaching-role").textContent = data.role;
+        document.getElementById("trend-teaching-action").textContent = `适合做什么：${data.actionLine || "先观察。"} `;
+        document.getElementById("trend-teaching-avoidline").textContent = `不适合做什么：${data.avoidLine || "别急着乱动。"} `;
+        document.getElementById("trend-teaching-what").textContent = `先看什么：${data.what}`;
+        document.getElementById("trend-teaching-focus").textContent = `更该留意：${data.focus}`;
+        document.getElementById("trend-teaching-avoid").textContent = `什么时候别急：${data.avoid}`;
+        document.getElementById("trend-teaching-label").textContent = `${timeframe} 教学模式 · ${data.scoreLabel || "观察中"}`;
+        document.getElementById("trend-teaching-modal").hidden = false;
+        document.body.classList.add("trend-modal-open");
+      }
+
+      function closeTeachingModal() {
+        document.getElementById("trend-teaching-modal").hidden = true;
+        document.body.classList.remove("trend-modal-open");
+      }
+
+      function bindTeachingTriggers() {
+        document.querySelectorAll(".trend-timeframe-trigger").forEach((node) => {
+          node.onclick = () => openTeachingModal(node.dataset.timeframe || "15分钟");
+        });
+      }
+
+      function updateFocusSummary(cells, dailyDirection) {
+        const ranked = [...cells]
+          .map((cell) => ({ cell, meta: beginnerFocusMeta(cell, dailyDirection) }))
+          .sort((a, b) => b.meta.score - a.meta.score || b.cell.score - a.cell.score);
+        const top = ranked.slice(0, 2);
+        const summary = top.length
+          ? `今天最该重点看 ${top.map((item) => item.cell.timeframe).join(" 和 ")}，先从 ${top[0].cell.timeframe} 开始。`
+          : "今天先从 15分钟 和 4小时 开始看。";
+        document.getElementById("trend-focus-summary").textContent = summary;
+      }
+
+      function formatPrice(value) {
+        if (value === null || value === undefined) return "--";
+        const number = Number(value);
+        return number.toLocaleString("en-US", {
+          minimumFractionDigits: number < 1 ? 4 : 2,
+          maximumFractionDigits: number < 1 ? 6 : 2
+        });
+      }
+
+      function formatPercent(value) {
+        if (value === null || value === undefined) return "等待数据";
+        const prefix = value > 0 ? "+" : "";
+        return `${prefix}${Number(value).toFixed(2)}%`;
+      }
+
+      function setActionMessage(text, type = "") {
+        const node = document.getElementById("action-message");
+        node.textContent = text;
+        node.className = `helper-text ${type}`.trim();
+      }
+
+      function getTrendAssets(payload) {
+        return payload.trend_learning && payload.trend_learning.assets
+          ? payload.trend_learning.assets
+          : {};
+      }
+
+      function renderTrendButtons(payload) {
+        const trendAssets = getTrendAssets(payload);
+        const container = document.getElementById("trend-asset-buttons");
+        container.innerHTML = "";
+        const assetKeys = Object.keys(trendAssets);
+        if (!assetKeys.length) {
+          container.innerHTML = `<div class="helper-text">趋势学习数据暂时还没准备好，请先等一轮真实行情刷新。</div>`;
+          return;
+        }
+        if (!trendAssets[selectedTrendAsset]) {
+          selectedTrendAsset = assetKeys[0];
+        }
+        assetKeys.forEach((asset) => {
+          const snapshot = trendAssets[asset];
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `trend-asset-button ${asset === selectedTrendAsset ? "trend-asset-button-active" : ""}`;
+          button.innerHTML = `
+            <strong>${asset}</strong>
+            <span>${snapshot.trendBias}</span>
+          `;
+          button.addEventListener("click", () => {
+            selectedTrendAsset = asset;
+            renderTrendButtons(payload);
+            renderTrendModule(payload);
+          });
+          container.appendChild(button);
+        });
+      }
+
+      function renderMiniCandles(candles) {
+        if (!Array.isArray(candles) || !candles.length) {
+          return "";
+        }
+        const latest = candles[candles.length - 1];
+        const guides = [9, 18, 27].map((y) => `<line class="trend-chart-guide" x1="0" y1="${y}" x2="100" y2="${y}"></line>`).join("");
+        const lastPrice = latest ? `<line class="trend-chart-last" x1="0" y1="${latest.closeY}" x2="100" y2="${latest.closeY}"></line>` : "";
+        const bodies = candles.map((candle) => {
+          const x = Number(candle.x || 0);
+          const width = Number(candle.width || 2);
+          const rectX = x - width / 2;
+          const candleClass = candle.direction === "down" ? "trend-candle trend-candle-down" : "trend-candle trend-candle-up";
+          return `
+            <g class="${candleClass}">
+              <line class="trend-candle-wick" x1="${x}" y1="${candle.wickTop}" x2="${x}" y2="${candle.wickBottom}"></line>
+              <rect class="trend-candle-body" x="${rectX}" y="${candle.bodyTop}" width="${width}" height="${candle.bodyHeight}" rx="1"></rect>
+            </g>
+          `;
+        }).join("");
+        return `${guides}${lastPrice}${bodies}`;
+      }
+
+      function hoverBadgeMeta(candle) {
+        const shape = candle?.shapeLabel || (candle?.direction === "down" ? "下跌实体" : "上涨实体");
+        if (shape === "上涨实体") {
+          return { icon: "▲", tone: "bull", shape };
+        }
+        if (shape === "下跌实体") {
+          return { icon: "▼", tone: "bear", shape };
+        }
+        return { icon: "◆", tone: "range", shape: "十字犹豫" };
+      }
+
+      function headlineSignalMeta(plan) {
+        const tone = plan?.headlineTone || "watch";
+        if (tone === "bull") {
+          return { label: "大方向偏多", tone: "bull" };
+        }
+        if (tone === "bear") {
+          return { label: "大方向偏空", tone: "bear" };
+        }
+        return { label: "大方向先观察", tone: tone === "range" ? "range" : "watch" };
+      }
+
+      function cellSignalMeta(cell) {
+        if (cell.direction === "上涨") {
+          return { label: "偏多", tone: "bull", icon: "↗", hoverWord: "偏多" };
+        }
+        if (cell.direction === "下跌") {
+          return { label: "偏空", tone: "bear", icon: "↘", hoverWord: "偏空" };
+        }
+        return { label: "先观察", tone: "range", icon: "≈", hoverWord: "先观察" };
+      }
+
+      function alignmentMeta(cellDirection, dailyDirection) {
+        if (dailyDirection === "震荡") {
+          return { label: "大方向未明", tone: "range", icon: "?" };
+        }
+        if (cellDirection === "震荡") {
+          return { label: "还没跟上", tone: "range", icon: "…" };
+        }
+        if (cellDirection === dailyDirection) {
+          return { label: "顺大方向", tone: dailyDirection === "上涨" ? "bull" : "bear", icon: "同" };
+        }
+        return { label: "逆大方向", tone: "warn", icon: "反" };
+      }
+
+      function renderHoverPrice(cell, candle) {
+        if (!candle) {
+          return `现价 ${formatPrice(cell.metrics?.lastPrice)}`;
+        }
+        const signalMeta = cellSignalMeta(cell);
+        const moveWord = signalMeta.hoverWord;
+        const badge = hoverBadgeMeta(candle);
+        const closeValue = Number(candle.closeValue ?? cell.metrics?.lastPrice);
+        return `
+          <span class="trend-pill-badge trend-pill-badge-${badge.tone}">
+            <i>${badge.icon}</i>
+            <span>${badge.shape}</span>
+          </span>
+          <span class="trend-pill-copy">${cell.timeframe} ${moveWord} · ${formatPrice(closeValue)}</span>
+        `;
+      }
+
+      function renderScenarioCard(title, plan, accentClass) {
+        if (!plan) {
+          return "";
+        }
+        return `
+          <article class="trend-plan-card trend-plan-card-wide trend-scenario-card ${accentClass}">
+            <div class="trend-scenario-head">
+              <div>
+                <span>${title}</span>
+                <strong>${plan.setup}</strong>
+              </div>
+              <em>${plan.riskReward}</em>
+            </div>
+            <p class="trend-scenario-intro">${plan.whenToUse}</p>
+            <div class="trend-scenario-grid">
+              <div><span>观察区</span><strong>${plan.entryZone}</strong></div>
+              <div><span>安全带</span><strong>${plan.stopLoss}</strong></div>
+              <div><span>目标一</span><strong>${plan.target1}</strong></div>
+              <div><span>目标二</span><strong>${plan.target2}</strong></div>
+            </div>
+            <div class="trend-scenario-rules">
+              <p><strong>触发条件：</strong>${plan.triggerRule}</p>
+              <p><strong>失效条件：</strong>${plan.invalidationRule}</p>
+            </div>
+          </article>
+        `;
+      }
+
+      function renderRecommendedPlanSpotlight(plan) {
+        if (!plan) {
+          return "";
+        }
+        const spotlightPlan = plan.recommendedPlan === "做多观察方案" ? plan.longPlan : plan.recommendedPlan === "做空观察方案" ? plan.shortPlan : null;
+        if (!spotlightPlan) {
+          return "";
+        }
+        const tone = plan.headlineTone || "watch";
+        const strength = plan.headlineStrength || "soft";
+        const headlineMeta = headlineSignalMeta(plan);
+        return `
+          <article class="trend-plan-card trend-plan-card-wide trend-plan-spotlight trend-plan-spotlight-${tone}">
+            <div class="trend-spotlight-banner trend-spotlight-banner-${tone}">
+              <span class="trend-banner-signal"><i class="trend-signal-dot trend-signal-dot-${headlineMeta.tone} trend-signal-dot-${strength}" aria-hidden="true"></i>${headlineMeta.label}</span>
+              <strong>${plan.headlineConclusion || plan.simpleConclusion}</strong>
+            </div>
+            <div class="trend-spotlight-head">
+              <div>
+                <span>当前主计划</span>
+                <strong>${plan.recommendedPlan}</strong>
+              </div>
+              <em>${spotlightPlan.setup}</em>
+            </div>
+            <div class="trend-spotlight-conclusion">${plan.simpleConclusion}</div>
+            <p class="trend-spotlight-text">${spotlightPlan.whenToUse}</p>
+            <div class="trend-spotlight-notes">
+              <div class="trend-note-bar trend-note-bar-info">
+                <b class="trend-note-icon" aria-hidden="true">看</b>
+                <div class="trend-note-copy"><span>先看什么</span><strong>${plan.watchFirst}</strong></div>
+              </div>
+              <div class="trend-note-bar trend-note-bar-warn">
+                <b class="trend-note-icon" aria-hidden="true">停</b>
+                <div class="trend-note-copy"><span>什么时候别做</span><strong>${plan.avoidWhen}</strong></div>
+              </div>
+            </div>
+            <div class="trend-spotlight-grid">
+              <div><span>观察区</span><strong>${spotlightPlan.entryZone}</strong></div>
+              <div><span>安全带</span><strong>${spotlightPlan.stopLoss}</strong></div>
+              <div><span>目标一</span><strong>${spotlightPlan.target1}</strong></div>
+              <div><span>目标二</span><strong>${spotlightPlan.target2}</strong></div>
+            </div>
+            <div class="trend-spotlight-rules">
+              <p><strong>触发动作：</strong>${spotlightPlan.triggerRule}</p>
+              <p><strong>计划失效：</strong>${spotlightPlan.invalidationRule}</p>
+            </div>
+          </article>
+        `;
+      }
+
+      function renderTrendModule(payload) {
+        const trendAssets = getTrendAssets(payload);
+        const assetKeys = Object.keys(trendAssets);
+        if (!assetKeys.length) {
+          document.getElementById("trend-current-asset").textContent = "--";
+          document.getElementById("trend-bias-text").textContent = "等待真实行情";
+          document.getElementById("trend-phase-text").textContent = "还没有可用数据";
+          document.getElementById("trend-duration-text").textContent = "请先等后台拉到 K 线。";
+          document.getElementById("trend-explanation-text").textContent = "当前还没有足够的真实 K 线数据来生成学习解释。";
+          document.getElementById("trend-ai-text").textContent = "“后台正在准备真实趋势数据，请稍后刷新。”";
+          document.getElementById("trend-warning-text").textContent = "当前没有可用的趋势冲突提醒。";
+          document.getElementById("trend-headline").textContent = "等待数据";
+          document.getElementById("trend-risk-reward-pill").textContent = "盈亏比：--";
+          document.getElementById("trend-plan-summary").textContent = "还没有形成可执行计划。";
+          document.getElementById("trend-heatmap").innerHTML = "";
+          document.getElementById("trend-plan-grid").innerHTML = "";
+          document.getElementById("trend-reason-grid").innerHTML = "";
+          return;
+        }
+        if (!trendAssets[selectedTrendAsset]) {
+          selectedTrendAsset = assetKeys[0];
+        }
+        const snapshot = trendAssets[selectedTrendAsset];
+        document.getElementById("trend-current-asset").textContent = selectedTrendAsset;
+        document.getElementById("trend-bias-text").textContent = snapshot.trendBias;
+        document.getElementById("trend-phase-text").textContent = snapshot.phase;
+        document.getElementById("trend-duration-text").textContent = snapshot.durationHint;
+        document.getElementById("trend-explanation-text").textContent = snapshot.explanation;
+        document.getElementById("trend-ai-text").textContent = `“${snapshot.aiScript}”`;
+        document.getElementById("trend-warning-text").textContent = snapshot.warning;
+        document.getElementById("trend-headline").textContent = snapshot.trendBias;
+        document.getElementById("trend-risk-reward-pill").textContent = `盈亏比：${snapshot.plan.riskReward}`;
+        document.getElementById("trend-plan-summary").textContent = snapshot.plan.planSummary;
+
+        const heatmap = document.getElementById("trend-heatmap");
+        heatmap.innerHTML = "";
+        const dailyCell = snapshot.heatmap.find((item) => item.timeframe === "日线") || snapshot.heatmap[snapshot.heatmap.length - 1];
+        updateFocusSummary(snapshot.heatmap, dailyCell?.direction || "震荡");
+        currentTeachingContext = {};
+        snapshot.heatmap.forEach((cell) => {
+          const signalMeta = cellSignalMeta(cell);
+          const alignMeta = alignmentMeta(cell.direction, dailyCell?.direction || "震荡");
+          const focusMeta = beginnerFocusMeta(cell, dailyCell?.direction || "震荡");
+          currentTeachingContext[cell.timeframe] = buildDynamicTeaching(cell.timeframe, cell, dailyCell);
+          const article = document.createElement("article");
+          article.className = `trend-cell trend-${cell.tone}`;
+          article.innerHTML = `
+            <div class="trend-cell-top">
+              <div>
+                <button type="button" class="trend-timeframe trend-timeframe-trigger" data-timeframe="${cell.timeframe}">${cell.timeframe}</button>
+                <strong>${cell.direction}</strong>
+              </div>
+              <div class="trend-cell-tags">
+                <span class="trend-cell-signal trend-cell-signal-${signalMeta.tone}"><i aria-hidden="true">${signalMeta.icon}</i><span>${signalMeta.label}</span></span>
+                <span class="trend-cell-align trend-cell-align-${alignMeta.tone}"><i aria-hidden="true">${alignMeta.icon}</i><span>${alignMeta.label}</span></span>
+                <span class="trend-focus-score"><i aria-hidden="true">★</i><span>${focusMeta.score}/5 ${focusMeta.label}</span></span>
+                <span class="trend-tone-chip">${cell.mission}</span>
+              </div>
+            </div>
+            <div class="trend-chart-wrap">
+              <svg class="trend-mini-chart" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">
+                ${renderMiniCandles(cell.miniCandles)}
+              </svg>
+              <div class="trend-chart-crosshair" aria-hidden="true">
+                <i class="trend-crosshair-x"></i>
+                <i class="trend-crosshair-y"></i>
+              </div>
+              <div class="trend-price-pill">现价 ${formatPrice(cell.metrics?.lastPrice)}</div>
+            </div>
+            <p class="trend-cell-summary">${cell.summary}</p>
+            <div class="trend-score-row">
+              <span>趋势强度</span>
+              <strong>${cell.score}/100</strong>
+            </div>
+            <div class="trend-score-bar"><i style="width:${cell.score}%"></i></div>
+            <div class="trend-probability">可能持续：${cell.probabilityWindow}</div>
+            <div class="trend-align-note">${alignmentExplain(alignMeta)}</div>
+            <div class="trend-reason-list">
+              ${Array.isArray(cell.reasons) ? cell.reasons.map((reason) => `<p>${reason}</p>`).join("") : ""}
+            </div>
+          `;
+          const chartWrap = article.querySelector(".trend-chart-wrap");
+          const pricePill = article.querySelector(".trend-price-pill");
+          const crosshair = article.querySelector(".trend-chart-crosshair");
+          if (chartWrap && pricePill && crosshair) {
+            chartWrap.addEventListener("mousemove", (event) => {
+              const rect = chartWrap.getBoundingClientRect();
+              const relativeX = Math.max(0, Math.min(event.clientX - rect.left, rect.width));
+              const relativeY = Math.max(0, Math.min(event.clientY - rect.top, rect.height));
+              const candles = Array.isArray(cell.miniCandles) ? cell.miniCandles : [];
+              const candleIndex = candles.length
+                ? Math.max(0, Math.min(candles.length - 1, Math.round((relativeX / Math.max(1, rect.width)) * (candles.length - 1))))
+                : 0;
+              const activeCandle = candles[candleIndex];
+              chartWrap.style.setProperty("--crosshair-x", `${relativeX}px`);
+              chartWrap.style.setProperty("--crosshair-y", `${relativeY}px`);
+              chartWrap.style.setProperty("--price-pill-x", `${relativeX}px`);
+              chartWrap.classList.add("trend-chart-active");
+              pricePill.innerHTML = renderHoverPrice(cell, activeCandle);
+            });
+            chartWrap.addEventListener("mouseleave", () => {
+              chartWrap.classList.remove("trend-chart-active");
+              pricePill.textContent = `现价 ${formatPrice(cell.metrics?.lastPrice)}`;
+            });
+          }
+          const timeframeTrigger = article.querySelector(".trend-timeframe-trigger");
+          if (timeframeTrigger) {
+            timeframeTrigger.addEventListener("click", () => openTeachingModal(cell.timeframe));
+          }
+          heatmap.appendChild(article);
+        });
+        bindTeachingTriggers();
+
+        const planGrid = document.getElementById("trend-plan-grid");
+        planGrid.innerHTML = `
+          ${renderRecommendedPlanSpotlight(snapshot.plan)}
+          <div class="trend-plan-card trend-plan-card-focus"><span>计划姿态</span><strong>${snapshot.plan.stance}</strong><p>${snapshot.plan.action}</p></div>
+          <div class="trend-plan-card"><span>当前价格</span><strong>${snapshot.plan.current}</strong><p>现在市场大概在这里。</p></div>
+          <div class="trend-plan-card"><span>当前推荐</span><strong>${snapshot.plan.recommendedPlan}</strong><p>先跟大级别一致，再看短线有没有给确认。</p></div>
+          <div class="trend-plan-card"><span>观察入场区</span><strong>${snapshot.plan.entryZone}</strong><p>${snapshot.plan.entryRule}</p></div>
+          <div class="trend-plan-card"><span>地板价</span><strong>${snapshot.plan.support}</strong><p>支撑位，先看这里能不能顶住。</p></div>
+          <div class="trend-plan-card"><span>天花板价</span><strong>${snapshot.plan.resistance}</strong><p>阻力位，容易遇到卖压。</p></div>
+          <div class="trend-plan-card"><span>安全带</span><strong>${snapshot.plan.stopLoss}</strong><p>${snapshot.plan.stopRule}</p></div>
+          <div class="trend-plan-card"><span>目标一</span><strong>${snapshot.plan.target1}</strong><p>先到这里，通常可以考虑先落一部分。</p></div>
+          <div class="trend-plan-card"><span>目标二</span><strong>${snapshot.plan.target2}</strong><p>${snapshot.plan.targetRule}</p></div>
+          <div class="trend-plan-card"><span>盈亏比</span><strong>${snapshot.plan.riskReward}</strong><p>用入场区中位和安全带、目标一粗略估算。</p></div>
+          ${renderScenarioCard("做多观察方案", snapshot.plan.longPlan, "trend-scenario-long")}
+          ${renderScenarioCard("做空观察方案", snapshot.plan.shortPlan, "trend-scenario-short")}
+        `;
+
+        const reasonGrid = document.getElementById("trend-reason-grid");
+        reasonGrid.innerHTML = "";
+        (snapshot.reasonCards || []).forEach((card) => {
+          const article = document.createElement("article");
+          article.className = "trend-reason-card";
+          article.innerHTML = `
+            <div class="trend-reason-head">
+              <div>
+                <span>${card.timeframe}</span>
+                <strong>${card.direction}</strong>
+              </div>
+              <em>${card.score}/100</em>
+            </div>
+            <div class="trend-reason-block">
+              ${(card.reasons || []).map((reason) => `<p>${reason}</p>`).join("")}
+            </div>
+            <div class="trend-fact-list">
+              ${(card.facts || []).map((fact) => `<span>${fact}</span>`).join("")}
+            </div>
+          `;
+          reasonGrid.appendChild(article);
+        });
+      }
+
+      function renderMarket(rows) {
+        const grid = document.getElementById("market-grid");
+        grid.innerHTML = "";
+        rows.forEach((row) => {
+          const card = document.createElement("article");
+          card.className = "market-card";
+          card.innerHTML = `
+            <div class="card-top">
+              <div>
+                <h3>${row.symbol}</h3>
+                <p>${row.exchange} · ${row.pair}</p>
+              </div>
+              <span class="state-tag">${row.market_state}</span>
+            </div>
+            <div class="price">${formatPrice(row.price)}</div>
+            <div class="mini-grid">
+              <div><span>5分钟</span><strong>${formatPercent(row.change_5m_pct)}</strong></div>
+              <div><span>24小时</span><strong>${formatPercent(row.change_24h_pct)}</strong></div>
+              <div><span>量能倍数</span><strong>${row.volume_ratio === null ? "等待数据" : `${Number(row.volume_ratio).toFixed(2)}x`}</strong></div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      }
+
+      function renderRuntime(payload) {
+        const bot = payload.bot || {};
+        const settings = payload.settings || {};
+        document.getElementById("updated-at").textContent = payload.updated_at || "尚未执行";
+        document.getElementById("status-message").textContent = payload.status_message || "等待启动";
+        document.getElementById("monitor-meta").textContent = `${settings.preferred_exchange || "--"} · ${settings.display_symbols ? settings.display_symbols.join(", ") : ""}`;
+        document.getElementById("alert-thresholds").innerHTML =
+          `当前标准：<br>加密：5分钟波动 >= ${Number(settings.price_move_alert_pct ?? 0).toFixed(1)}%，量能 >= ${Number(settings.volume_spike_multiplier ?? 0).toFixed(1)} 倍<br>黄金 XAUUSDT：5分钟波动 >= ${Number(settings.xau_price_move_alert_pct ?? 0).toFixed(2)}%，量能 >= ${Number(settings.xau_volume_spike_multiplier ?? 0).toFixed(2)} 倍`;
+
+        const statusPill = document.getElementById("bot-status-pill");
+        const enabled = Boolean(bot.enabled);
+        statusPill.textContent = enabled ? "运行中" : "已关闭";
+        statusPill.className = `status-pill ${enabled ? "status-on" : "status-off"}`;
+
+        const healthText = document.getElementById("service-health-text");
+        const healthNote = document.getElementById("service-health-note");
+        const lastSuccess = document.getElementById("last-success-at");
+        const lastPush = document.getElementById("last-push-at");
+        const lastPushNote = document.getElementById("last-push-note");
+        const lastPushSymbols = document.getElementById("last-push-symbols");
+        const lastTestPushAt = document.getElementById("last-test-push-at");
+        const lastErrorText = document.getElementById("last-error-text");
+        const lastErrorNote = document.getElementById("last-error-note");
+        const restartButton = document.getElementById("restart-service-button");
+        const plainStatusBanner = document.getElementById("plain-status-banner");
+
+        if (bot.status === "running" && bot.last_success_at) {
+          healthText.textContent = "健康";
+          healthText.className = "health-value health-good health-signal signal-green";
+          healthNote.textContent = "服务在线，后台检查线程正在正常工作。";
+        } else if (bot.status === "error") {
+          healthText.textContent = "异常";
+          healthText.className = "health-value health-bad health-signal signal-red";
+          healthNote.textContent = "服务还在，但最近一轮检查失败了。";
+        } else if (enabled) {
+          healthText.textContent = "等待中";
+          healthText.className = "health-value health-warn health-signal signal-yellow";
+          healthNote.textContent = "机器人已开启，正在等待下一轮自动检查。";
+        } else {
+          healthText.textContent = "未启动";
+          healthText.className = "health-value health-signal";
+          healthNote.textContent = "机器人当前关闭，不会自动抓行情。";
+        }
+
+        lastSuccess.textContent = bot.last_success_at || "暂无";
+        lastPush.textContent = bot.last_push_at || "暂无";
+        if (bot.last_push_at) {
+          lastPush.className = "health-value health-good";
+          lastPushNote.textContent = bot.last_push_is_estimated
+            ? "这是根据历史信号记录推算出来的最近推送时间。"
+            : "这是最近一次真正发送到 Telegram 的时间。";
+        } else {
+          lastPush.className = "health-value";
+          lastPushNote.textContent = "如果这里还是“暂无”，说明最近还没有新的推送。";
+        }
+        lastPushSymbols.textContent = bot.last_push_symbols && bot.last_push_symbols.length
+          ? `最近一次推送的币种：${bot.last_push_symbols.join(" / ")}`
+          : "最近一次推送的币种：暂无";
+        lastTestPushAt.textContent = bot.last_test_push_at
+          ? `最近一次 Telegram 测试发送时间：${bot.last_test_push_at}`
+          : "最近一次 Telegram 测试发送时间：暂无";
+        lastErrorText.textContent = bot.last_error || "无";
+        lastErrorText.className = `health-value ${bot.last_error ? "health-bad" : "health-good"}`;
+        lastErrorNote.textContent = bot.last_error
+          ? "如果这里长期不为空，说明需要检查网络或重启服务。"
+          : "最近没有发现服务错误。";
+        restartButton.disabled = false;
+
+        plainStatusBanner.textContent = bot.plain_status_message || "正在读取推送状态...";
+        plainStatusBanner.className = `plain-status-banner plain-${bot.plain_status_level || "info"}`;
+
+        const toggleButton = document.getElementById("toggle-bot-button");
+        toggleButton.textContent = enabled ? "关闭机器人" : "开启机器人";
+        toggleButton.dataset.enabled = enabled ? "true" : "false";
+
+        const runtimeBox = document.getElementById("runtime-box");
+        runtimeBox.innerHTML = `
+          <div class="info-row"><span>状态</span><strong>${bot.status || "--"}</strong></div>
+          <div class="info-row"><span>上次检查</span><strong>${bot.last_cycle_at || "暂无"}</strong></div>
+          <div class="info-row"><span>本轮信号数</span><strong>${bot.last_signal_count ?? 0}</strong></div>
+          <div class="info-row"><span>本轮已发送</span><strong>${bot.last_sent_count ?? 0}</strong></div>
+          <div class="info-row"><span>错误信息</span><strong>${bot.last_error || "无"}</strong></div>
+        `;
+
+        const stats = payload.stats_placeholder || {};
+        document.getElementById("stats-box").innerHTML = `
+          <div class="info-row"><span>胜率统计</span><strong>${stats.win_rate || "预留"}</strong></div>
+          <div class="info-row"><span>最近信号数</span><strong>${stats.total_signals ?? 0}</strong></div>
+          <div class="info-row"><span>最近生成时间</span><strong>${stats.last_generated_at || "暂无"}</strong></div>
+        `;
+
+        const stockWatchlist = settings.stock_token_watchlist || [];
+        document.getElementById("stock-watchlist-box").innerHTML = `
+          <div class="info-row"><span>计划观察</span><strong>${stockWatchlist.length ? stockWatchlist.join(" / ") : "暂无"}</strong></div>
+          <div class="info-row"><span>当前状态</span><strong>预留入口，下一版接行情</strong></div>
+          <div class="info-row"><span>说明</span><strong>会与加密标的分开监控，避免混淆规则</strong></div>
+        `;
+      }
+
+      function renderSignals(rows) {
+        const body = document.getElementById("signals-body");
+        body.innerHTML = "";
+        if (!rows.length) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td colspan="10" class="empty-cell">还没有信号。你可以先点“立即检查一次”。</td>`;
+          body.appendChild(tr);
+          return;
+        }
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.time}</td>
+            <td>${row.symbol}</td>
+            <td>${row.bias}</td>
+            <td>${formatPrice(row.price)}</td>
+            <td>${row.entry_zone}</td>
+            <td>${formatPrice(row.stop_loss)}</td>
+            <td>${formatPrice(row.take_profit_1)}</td>
+            <td>${formatPrice(row.take_profit_2)}</td>
+            <td>${row.risk_level}</td>
+            <td>${row.trigger_reason}</td>
+          `;
+          body.appendChild(tr);
+        });
+      }
+
+      function applySettings(settings) {
+        document.getElementById("preferred-exchange").value = settings.preferred_exchange || "binance";
+        document.getElementById("poll-interval-seconds").value = String(settings.poll_interval_seconds || 300);
+        document.getElementById("notifications-enabled").checked = Boolean(settings.notifications_enabled);
+        document.getElementById("telegram-bot-token").value = settings.telegram_bot_token || "";
+        document.getElementById("telegram-chat-id").value = settings.telegram_chat_id || "";
+      }
+
+      function renderAll(payload) {
+        renderRuntime(payload);
+        renderMarket(payload.market_overview || []);
+        renderSignals(payload.recent_signals || []);
+        renderTrendButtons(payload);
+        renderTrendModule(payload);
+      }
+
+      async function refreshDashboard() {
+        const response = await fetch("/api/dashboard");
+        const payload = await response.json();
+        renderAll(payload);
+      }
+
+      async function saveSettings() {
+        const body = {
+          preferred_exchange: document.getElementById("preferred-exchange").value,
+          poll_interval_seconds: Number(document.getElementById("poll-interval-seconds").value),
+          notifications_enabled: document.getElementById("notifications-enabled").checked,
+          telegram_bot_token: document.getElementById("telegram-bot-token").value.trim(),
+          telegram_chat_id: document.getElementById("telegram-chat-id").value.trim()
+        };
+        const response = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message || "保存失败");
+        }
+        setActionMessage("设置已保存。", "success");
+      }
+
+      document.getElementById("settings-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await saveSettings();
+        } catch (error) {
+          setActionMessage(error.message, "error");
+        }
+      });
+
+      document.getElementById("toggle-bot-button").addEventListener("click", async () => {
+        try {
+          await saveSettings();
+          const enabled = document.getElementById("toggle-bot-button").dataset.enabled !== "true";
+          const response = await fetch("/api/bot/toggle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || "切换失败");
+          }
+          setActionMessage(result.message, "success");
+          renderAll(result.dashboard);
+        } catch (error) {
+          setActionMessage(error.message, "error");
+        }
+      });
+
+      document.getElementById("run-once-button").addEventListener("click", async () => {
+        try {
+          await saveSettings();
+          setActionMessage("正在执行检查，请稍等...", "loading");
+          const response = await fetch("/api/bot/run-once", { method: "POST" });
+          const result = await response.json();
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || "执行失败");
+          }
+          setActionMessage(result.message, "success");
+          renderAll(result.dashboard);
+        } catch (error) {
+          setActionMessage(error.message, "error");
+        }
+      });
+
+      document.getElementById("test-telegram-button").addEventListener("click", async () => {
+        try {
+          await saveSettings();
+          setActionMessage("正在发送测试消息...", "loading");
+          const response = await fetch("/api/notifications/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              telegram_bot_token: document.getElementById("telegram-bot-token").value.trim(),
+              telegram_chat_id: document.getElementById("telegram-chat-id").value.trim(),
+              notifications_enabled: document.getElementById("notifications-enabled").checked
+            })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || "测试失败");
+          }
+          setActionMessage(result.message, "success");
+        } catch (error) {
+          setActionMessage(error.message, "error");
+        }
+      });
+
+      document.getElementById("restart-service-button").addEventListener("click", async () => {
+        const button = document.getElementById("restart-service-button");
+        try {
+          button.disabled = true;
+          setActionMessage("正在重启服务，请稍等几秒...", "loading");
+          const response = await fetch("/api/service/restart", { method: "POST" });
+          const result = await response.json();
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || "重启失败");
+          }
+          setActionMessage(result.message, "loading");
+
+          let recovered = false;
+          for (let i = 0; i < 12; i += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            try {
+              const healthResponse = await fetch(`/api/dashboard?t=${Date.now()}`);
+              if (!healthResponse.ok) continue;
+              const payload = await healthResponse.json();
+              renderAll(payload);
+              setActionMessage("服务已恢复。", "success");
+              recovered = true;
+              break;
+            } catch (error) {
+            }
+          }
+
+          if (!recovered) {
+            setActionMessage("服务正在恢复中。如果还没回来，稍后手动刷新页面。", "loading");
+          }
+        } catch (error) {
+          setActionMessage(error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      document.getElementById("trend-teaching-close").addEventListener("click", closeTeachingModal);
+      document.getElementById("trend-teaching-backdrop").addEventListener("click", closeTeachingModal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeTeachingModal();
+        }
+      });
+
+      renderAll(initialPayload);
+      applySettings(initialSettings);
+      bindTeachingTriggers();
+      setInterval(refreshDashboard, 15000);
+    </script>
+  </body>
+</html>

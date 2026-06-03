@@ -1,0 +1,16 @@
+{
+  "poll_interval_seconds": 300,
+  "symbols": ["BTC", "ETH", "SOL", "SUI", "DOGE"],
+  "exchanges": ["binance", "okx"],
+  "preferred_exchange": "okx",
+  "price_move_alert_pct": 2.0,
+  "volume_spike_multiplier": 1.8,
+  "btc_market_sync_min_assets": 3,
+  "btc_market_sync_alt_move_pct": 1.0,
+  "data_dir": "data",
+  "request_timeout_seconds": 10,
+  "notifications_enabled": false,
+  "bot_enabled": false,
+  "telegram_bot_token": "把你的 TELEGRAM_BOT_TOKEN 填在这里",
+  "telegram_chat_id": "把你的 TELEGRAM_CHAT_ID 填在这里"
+}
